@@ -5,7 +5,7 @@ using System.Runtime.Serialization.Json;
 using log4net;
 using System.Text;
 
-namespace FFPPServer
+namespace FFPPCommunication
 {
     public class ReadWrite
     {

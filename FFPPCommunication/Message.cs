@@ -3,7 +3,7 @@ using System.Runtime.Serialization;
 using System.IO;
 using System.Runtime.Serialization.Json;
 using System.Net;
-namespace FFPPServer
+namespace FFPPCommunication
 {
     [DataContract(Name = "serverMessage", Namespace = "serverMessage")]
     public class Message : IExtensibleDataObject

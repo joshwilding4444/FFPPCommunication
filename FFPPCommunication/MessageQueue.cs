@@ -3,7 +3,7 @@ using System.Collections;
 using log4net;
 
 
-namespace FFPPServer
+namespace FFPPCommunication
 {
     /// <summary>
     /// Summary description for MessageQueue.
