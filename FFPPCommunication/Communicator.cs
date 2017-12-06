@@ -54,6 +54,7 @@ namespace FFPPCommunication
             _localEndPoint = new IPEndPoint(IPAddress.Any, _localPort);
             _udpClient = new UdpClient(_localEndPoint);
             Log.Debug("Creating UdpClient with end point " + _localEndPoint);
+            Console.WriteLine("Created UdpClient with end point " + _localEndPoint);
 
             _localEndPoint = _udpClient.Client.LocalEndPoint as IPEndPoint;
             if (_localEndPoint != null)
