@@ -20,6 +20,7 @@ namespace FFPPCommunication
         private int _localPort;
         private IPEndPoint _localEndPoint;
         private UdpClient _udpClient;
+        private int ResendAttempts = 0;
 
         private MessageQueue _queue = new MessageQueue();
         private AutoResetEvent _queueWaitHandle;
@@ -92,14 +93,24 @@ namespace FFPPCommunication
             }
         }
 
-        public bool MessageAvailable(int timeout)
+        public Message MessageAvailable()
         {
-            bool result = false;
-            if (_queue.Count > 0)
-                result = true;
-            else if (timeout > 0)
-                result = _queueWaitHandle.WaitOne(timeout, true);
-            return result;
+                Log.InfoFormat(@"Packet available");
+                var ep = new IPEndPoint(IPAddress.Any, 0);
+                byte[] receiveBytes = _udpClient?.Receive(ref ep);
+                Log.Debug($"Bytes received: {FormatBytesForDisplay(receiveBytes)}");
+                _readWrite.DecodeMessage(receiveBytes);
+                Message result = _readWrite.targetMessage;
+                if (result != null)
+                {
+                    Log.InfoFormat($"Received type: /n/t'{result.thisMessageType}' " +
+                        $"/n/t content: '{result.messageBody}' /n/t from: {result.fromAddress.Address}");
+                }
+                else
+                {
+                    Log.Warn(@"Data received, but could not be decoded");
+                }
+                return result;
         }
 
         public Message Dequeue()
@@ -114,6 +125,37 @@ namespace FFPPCommunication
             return result;
         }
 
+        //this function is used for the main listening loop. This will only process incoming requests.
+        public void Listen()
+        {
+            Log.Debug("Entering Listening");
+
+            try
+            {
+                // Wait for some data to become available
+                while (CommunicationsEnabled)
+                {
+                    if (_udpClient?.Available > 0)
+                    {
+                        Enqueue(MessageAvailable());
+                    }
+                    Thread.Sleep(10);
+                }
+
+            }
+            catch (SocketException err)
+            {
+                if (err.SocketErrorCode != SocketError.TimedOut && err.SocketErrorCode != SocketError.ConnectionReset)
+                    Log.ErrorFormat($"Socket error: {err.SocketErrorCode}, {err.Message}");
+            }
+            catch (Exception err)
+            {
+                Log.ErrorFormat($"Unexpected expection while receiving datagram: {err} ");
+            }
+            Log.Debug("Leaving Receive");
+        }
+
+        //this function is used to listen for a specific repsonse. If result is null, need to resend request
         public Message Receive(int timeout)
         {
             Log.Debug("Entering Receive");
@@ -131,22 +173,9 @@ namespace FFPPCommunication
                 // If there is data receive and communications are enabled, then read that data
                 if (CommunicationsEnabled && _udpClient?.Available > 0)
                 {
-                    Log.InfoFormat(@"Packet available");
-                    var ep = new IPEndPoint(IPAddress.Any, 0);
-                    byte[] receiveBytes = _udpClient?.Receive(ref ep);
-                    Log.Debug($"Bytes received: {FormatBytesForDisplay(receiveBytes)}");
-                    _readWrite.DecodeMessage(receiveBytes);
-                    result = _readWrite.targetMessage;
-                    if (result != null)
-                    {
-                        Log.InfoFormat($"Received type: /n/t'{result.thisMessageType}' " +
-                            $"/n/t content: '{result.messageBody}' /n/t from: {result.fromAddress.Address}");
-                    }
-                    else
-                    {
-                        Log.Warn(@"Data received, but could not be decoded");
-                    }
+                    result = MessageAvailable();
                 }
+
             }
             catch (SocketException err)
             {
@@ -159,6 +188,19 @@ namespace FFPPCommunication
             }
             Log.Debug("Leaving Receive");
             return result;
+        }
+
+        public bool Resend(Message msg, IPEndPoint targetEndPoint)
+        {
+            if(ResendAttempts < 3)
+            {
+                return Send(msg, targetEndPoint);
+            }
+            else
+            {
+                Log.Debug($"Message Failed. Message: {msg}, MessageBody: {msg.messageBody}");
+                return false;
+            }
         }
 
         public bool Send(Message msg, IPEndPoint targetEndPoint)
