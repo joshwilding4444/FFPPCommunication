@@ -17,10 +17,12 @@ namespace FFPPCommunication
         private static readonly ILog Log = LogManager.GetLogger(typeof(Communicator));
 
         private int _localPort;
+        public Guid CommunicatorID { get; set; }
         private IPEndPoint _localEndPoint;
         private UdpClient _udpClient;
+        private int ResendAttempts = 0;
 
-        private MessageQueue _queue = new MessageQueue();
+        public MessageQueue _queue = new MessageQueue();
         private AutoResetEvent _queueWaitHandle;
         private ReadWrite _readWrite = new ReadWrite();
         
@@ -48,7 +50,8 @@ namespace FFPPCommunication
 
         public void Initialize()
         {
-            Log.Debug("Initializing communicator");
+            CommunicatorID = Guid.NewGuid();
+            Log.Debug($"Initializing communicator {CommunicatorID}");
 
             _localEndPoint = new IPEndPoint(IPAddress.Any, _localPort);
             _udpClient = new UdpClient(_localEndPoint);
@@ -59,12 +62,12 @@ namespace FFPPCommunication
             if (_localEndPoint != null)
             {
                 _localPort = _localEndPoint.Port;
-                Log.Info("Created Communicator's UdpClient, bound to " + _localEndPoint);
+                Log.Info($"Created UdpClient for Communicator {CommunicatorID}, bound to {_localEndPoint}");
 
                // _queue = new MessageQueue();
                 _queueWaitHandle = new AutoResetEvent(false);
 
-                Log.Debug("Done initializing communicator");
+                Log.Debug($"Done initializing Communicator {CommunicatorID}");
             }
         }
 
@@ -92,14 +95,25 @@ namespace FFPPCommunication
             }
         }
 
-        public bool MessageAvailable(int timeout)
+        public Message MessageAvailable()
         {
-            bool result = false;
-            if (_queue.Count > 0)
-                result = true;
-            else if (timeout > 0)
-                result = _queueWaitHandle.WaitOne(timeout, true);
-            return result;
+                Log.InfoFormat(@"Packet available");
+                var ep = new IPEndPoint(IPAddress.Any, 0);
+                byte[] receiveBytes = _udpClient?.Receive(ref ep);
+                Log.Debug($"Bytes received: {FormatBytesForDisplay(receiveBytes)}");
+                _readWrite.DecodeMessage(receiveBytes);
+                Message result = _readWrite.targetMessage;
+                result.fromAddress = ep;
+                if (result != null)
+                {
+                    Log.InfoFormat($"Received type: '{result.thisMessageType}' " +
+                        $" content: '{result.messageBody}' from: {result.fromAddress}");
+                }
+                else
+                {
+                    Log.Warn(@"Data received, but could not be decoded");
+                }
+                return result;
         }
 
         public Message Dequeue()
@@ -110,10 +124,41 @@ namespace FFPPCommunication
                 result = _queue.Dequeue();
 
             if (result != null)
-                Log.Debug("Dequeue message = " + result);
+                Log.Debug($"Dequeue message: Message Type: {result.thisMessageType}, Message Body: {result.messageBody}");
             return result;
         }
 
+        //this function is used for the main listening loop. This will only process incoming requests.
+        public void Listen()
+        {
+            Log.Debug($"Communicator {CommunicatorID} Entering Listening");
+
+            try
+            {
+                // Wait for some data to become available
+                while (CommunicationsEnabled)
+                {
+                    if (_udpClient?.Available > 0)
+                    {
+                        Enqueue(MessageAvailable());
+                    }
+                    Thread.Sleep(10);
+                }
+
+            }
+            catch (SocketException err)
+            {
+                if (err.SocketErrorCode != SocketError.TimedOut && err.SocketErrorCode != SocketError.ConnectionReset)
+                    Log.ErrorFormat($"Socket error: {err.SocketErrorCode}, {err.Message}");
+            }
+            catch (Exception err)
+            {
+                Log.ErrorFormat($"Unexpected expection while receiving datagram: {err} ");
+            }
+            Log.Debug("Leaving Receive");
+        }
+
+        //this function is used to listen for a specific repsonse. If result is null, need to resend request
         public Message Receive(int timeout)
         {
             Log.Debug("Entering Receive");
@@ -158,7 +203,9 @@ namespace FFPPCommunication
                     {
                         Log.Warn(@"Data received, but could not be decoded");
                     }
+                    //result = MessageAvailable();
                 }
+
             }
             catch (SocketException err)
             {
@@ -171,6 +218,19 @@ namespace FFPPCommunication
             }
             Log.Debug("Leaving Receive");
             return result;
+        }
+
+        public bool Resend(Message msg, IPEndPoint targetEndPoint)
+        {
+            if(ResendAttempts < 3)
+            {
+                return Send(msg, targetEndPoint);
+            }
+            else
+            {
+                Log.Debug($"Message Failed. Message: {msg}, MessageBody: {msg.messageBody}");
+                return false;
+            }
         }
 
         public bool Send(Message msg, IPEndPoint targetEndPoint)
@@ -192,7 +252,7 @@ namespace FFPPCommunication
                     Log.Debug($"Send {msg} to {msg.fromAddress}");
                     byte[] buffer = _readWrite.EncodeMessage( msg );
                     Log.Debug($"Bytes sent: {FormatBytesForDisplay(buffer)}");
-                    int count = _udpClient.Send(buffer, buffer.Length, msg.fromAddress); //??
+                    int count = _udpClient.Send(buffer, buffer.Length, msg.fromAddress);
                     result = (count == buffer.Length);
                     Log.Info($"Sent {msg.messageBody} of type '{msg.thisMessageType}' to {msg.fromAddress.Address}, result={result}");
                 }
