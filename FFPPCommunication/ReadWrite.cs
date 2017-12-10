@@ -4,11 +4,14 @@ using System.IO;
 using System.Runtime.Serialization.Json;
 using log4net;
 using System.Text;
+using System.Security.Cryptography;
 
 namespace FFPPCommunication
 {
     public class ReadWrite
     {
+        public const int KEY_SIZE = 2048;
+        RSACryptoServiceProvider RSA = new RSACryptoServiceProvider(KEY_SIZE);
         //https://www.codeproject.com/Articles/140911/log-net-Tutorial
         private static readonly log4net.ILog log = log4net.LogManager.GetLogger(typeof(Message));
         public Message targetMessage { get; set; }
@@ -22,6 +25,19 @@ namespace FFPPCommunication
             log.Info("Extracted JSON: " + targetMessage.ToString());
         }
 
+        public Message DecodeEncryptedMessage(byte[] encryptedMessage)
+        {
+            //RSACryptoServiceProvider RSA = new RSACryptoServiceProvider(KEY_SIZE);
+            byte[] unencryptedMessage = RSA.Decrypt(encryptedMessage, false);
+            MemoryStream rawData = new MemoryStream(unencryptedMessage);
+            log.Info("Received Byte Stream: " + rawData.ToString());
+            BinaryReader readingStream = new BinaryReader(rawData);
+            DataContractJsonSerializer messageReader = new DataContractJsonSerializer(typeof(Message));
+            //targetMessage = (Message)messageReader.ReadObject(rawData);
+            log.Info("Extracted JSON: " + targetMessage.ToString());
+            return (Message)messageReader.ReadObject(rawData);
+        }
+
         public byte[] EncodeMessage()
         {
             MemoryStream writingStream = new MemoryStream();
@@ -33,8 +49,16 @@ namespace FFPPCommunication
             //https://connect.microsoft.com/VisualStudio/feedback/details/356750/datacontractjsonserializer-fails-with-non-ansi-characters
             string messageJSON = Encoding.UTF8.GetString(writingStream.ToArray());
             log.Info("Message after encoding: " + messageJSON);
-            return Encoding.UTF8.GetBytes(messageJSON);
-
+            byte[] unencryptedMessage = Encoding.UTF8.GetBytes(messageJSON);
+            if (targetMessage.thisMessageType == Message.messageType.JOIN)
+            {
+                return unencryptedMessage;
+            }
+            else
+            {
+                byte[] encryptedMessage = RSA.Encrypt(unencryptedMessage, false);
+                return encryptedMessage;
+            }
         }
 
         public byte[] EncodeMessage(Message inputMessage)
@@ -47,7 +71,16 @@ namespace FFPPCommunication
             log.Info("Message after encoding: " + writingStream.GetBuffer());
             string messageJSON = Encoding.UTF8.GetString(writingStream.ToArray());
             log.Info("Message after encoding: " + messageJSON);
-            return Encoding.UTF8.GetBytes(messageJSON);
+            byte[] unencryptedMessage = Encoding.UTF8.GetBytes(messageJSON);
+            if (inputMessage.thisMessageType == Message.messageType.JOIN)
+            {
+                return unencryptedMessage;
+            }
+            else
+            {
+                byte[] encryptedMessage = RSA.Encrypt(unencryptedMessage, false);
+                return encryptedMessage;
+            }
         }
     }
 }

@@ -6,7 +6,6 @@ using System.Threading;
 
 using log4net;
 
-
 namespace FFPPCommunication
 {
     /// <summary>
@@ -138,10 +137,22 @@ namespace FFPPCommunication
                     Log.Debug($"Bytes received: {FormatBytesForDisplay(receiveBytes)}");
                     _readWrite.DecodeMessage(receiveBytes);
                     result = _readWrite.targetMessage;
+                    
+
                     if (result != null)
                     {
-                        Log.InfoFormat($"Received type: /n/t'{result.thisMessageType}' " +
+                        if (result.thisMessageType == Message.messageType.JOIN)
+                        {
+                            Log.InfoFormat($"Received type: /n/t'{result.thisMessageType}' " +
                             $"/n/t content: '{result.messageBody}' /n/t from: {result.fromAddress.Address}");
+                        }
+                        else
+                        {
+                            _readWrite.DecodeEncryptedMessage(receiveBytes);
+                            result = _readWrite.targetMessage;
+                            Log.InfoFormat($"Received type: /n/t'{result.thisMessageType}' " +
+                            $"/n/t content: '{result.messageBody}' /n/t from: {result.fromAddress.Address}");
+                        }
                     }
                     else
                     {
